@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 
@@ -5,14 +6,18 @@ namespace DynCore.Core;
 
 /// <summary>
 /// Registro de comandos DynCore. Carga definiciones desde archivos JSON.
-/// Soporta hot reload: si cambias un JSON en disco, se recarga automáticamente.
+/// Soporta hot reload con debounce y retry.
 /// </summary>
 public class DynRegistry : IDisposable
 {
     private readonly Dictionary<string, DynCommand> _commands = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string> _fileToCommandId = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, CancellationTokenSource> _debounceTokens = new();
     private readonly ILogger<DynRegistry> _logger;
     private readonly object _lock = new();
     private FileSystemWatcher? _watcher;
+    private const int DebounceMs = 500;
+    private const int MaxRetries = 3;
 
     public DynRegistry(ILogger<DynRegistry> logger)
     {
@@ -42,9 +47,6 @@ public class DynRegistry : IDisposable
             StartWatching(fullPath);
     }
 
-    /// <summary>
-    /// Obtiene un comando por su ID.
-    /// </summary>
     public DynCommand Get(string commandId)
     {
         lock (_lock)
@@ -57,27 +59,18 @@ public class DynRegistry : IDisposable
             $"Comando '{commandId}' no encontrado. Disponibles: {string.Join(", ", GetAllIds().Take(10))}");
     }
 
-    /// <summary>
-    /// Intenta obtener un comando. Regresa false si no existe.
-    /// </summary>
     public bool TryGet(string commandId, out DynCommand? command)
     {
         lock (_lock)
             return _commands.TryGetValue(commandId, out command);
     }
 
-    /// <summary>
-    /// Lista todos los IDs de comandos registrados.
-    /// </summary>
     public IReadOnlyCollection<string> GetAllIds()
     {
         lock (_lock)
             return _commands.Keys.ToList().AsReadOnly();
     }
 
-    /// <summary>
-    /// Lista todos los comandos registrados.
-    /// </summary>
     public IReadOnlyCollection<DynCommand> GetAll()
     {
         lock (_lock)
@@ -95,6 +88,7 @@ public class DynRegistry : IDisposable
         lock (_lock)
         {
             _commands.Clear();
+            _fileToCommandId.Clear();
             foreach (var file in files)
                 LoadSingleFile(file);
         }
@@ -115,7 +109,14 @@ public class DynRegistry : IDisposable
                 return;
             }
 
+            var normalizedPath = Path.GetFullPath(file);
+
+            // Si este archivo ya tenía un comando con otro ID, remover el viejo
+            if (_fileToCommandId.TryGetValue(normalizedPath, out var oldId) && oldId != cmd.Id)
+                _commands.Remove(oldId);
+
             _commands[cmd.Id] = cmd;
+            _fileToCommandId[normalizedPath] = cmd.Id;
             _logger.LogDebug("DynRegistry: '{Id}' cargado desde {File}", cmd.Id, file);
         }
         catch (JsonException ex)
@@ -125,7 +126,7 @@ public class DynRegistry : IDisposable
     }
 
     // =====================================================================
-    // HOT RELOAD
+    // HOT RELOAD - con debounce y retry
     // =====================================================================
 
     private void StartWatching(string path)
@@ -147,46 +148,87 @@ public class DynRegistry : IDisposable
 
     private void OnFileChanged(object sender, FileSystemEventArgs e)
     {
-        // Delay breve para evitar lecturas parciales (el SO avisa antes de terminar de escribir)
-        Task.Delay(100).ContinueWith(_ =>
+        DebounceReload(e.FullPath);
+    }
+
+    /// <summary>
+    /// Debounce: si llegan múltiples eventos para el mismo archivo en 500ms,
+    /// solo procesa el último. Evita recargas innecesarias.
+    /// </summary>
+    private void DebounceReload(string filePath)
+    {
+        // Cancelar debounce anterior para este archivo
+        if (_debounceTokens.TryRemove(filePath, out var oldCts))
+            oldCts.Cancel();
+
+        var cts = new CancellationTokenSource();
+        _debounceTokens[filePath] = cts;
+
+        Task.Delay(DebounceMs, cts.Token).ContinueWith(_ =>
+        {
+            _debounceTokens.TryRemove(filePath, out CancellationTokenSource? _);
+            ReloadFileWithRetry(filePath);
+        }, cts.Token, TaskContinuationOptions.OnlyOnRanToCompletion, TaskScheduler.Default);
+    }
+
+    /// <summary>
+    /// Retry: intenta leer el archivo hasta 3 veces con delay creciente.
+    /// Evita fallos por archivos aún bloqueados por el editor.
+    /// </summary>
+    private void ReloadFileWithRetry(string filePath)
+    {
+        for (int attempt = 1; attempt <= MaxRetries; attempt++)
         {
             try
             {
                 lock (_lock)
-                    LoadSingleFile(e.FullPath);
+                    LoadSingleFile(filePath);
 
-                _logger.LogInformation("DynRegistry: Recargado '{File}'", e.Name);
+                _logger.LogInformation("DynRegistry: Recargado '{File}'", Path.GetFileName(filePath));
+                return;
+            }
+            catch (IOException) when (attempt < MaxRetries)
+            {
+                Thread.Sleep(200 * attempt);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "DynRegistry: Error recargando '{File}'", e.Name);
+                _logger.LogWarning(ex, "DynRegistry: Error recargando '{File}' (intento {Attempt}/{Max})",
+                    Path.GetFileName(filePath), attempt, MaxRetries);
             }
-        });
+        }
     }
 
     private void OnFileDeleted(object sender, FileSystemEventArgs e)
     {
+        var normalizedPath = Path.GetFullPath(e.FullPath);
+
         lock (_lock)
         {
-            var toRemove = _commands.Where(kv => true).FirstOrDefault(kv =>
+            if (_fileToCommandId.TryGetValue(normalizedPath, out var commandId))
             {
-                // Buscar qué comando venía de este archivo por ID derivado del nombre
-                var fileName = Path.GetFileNameWithoutExtension(e.Name);
-                return kv.Key.Equals(fileName, StringComparison.OrdinalIgnoreCase);
-            });
-
-            if (toRemove.Key != null)
-            {
-                _commands.Remove(toRemove.Key);
-                _logger.LogInformation("DynRegistry: Comando '{Id}' removido (archivo eliminado)", toRemove.Key);
+                _commands.Remove(commandId);
+                _fileToCommandId.Remove(normalizedPath);
+                _logger.LogInformation("DynRegistry: Comando '{Id}' removido (archivo eliminado)", commandId);
             }
         }
     }
 
     private void OnFileRenamed(object sender, RenamedEventArgs e)
     {
-        OnFileDeleted(sender, new FileSystemEventArgs(WatcherChangeTypes.Deleted, Path.GetDirectoryName(e.OldFullPath)!, e.OldName!));
-        OnFileChanged(sender, e);
+        // Remover el viejo
+        var oldPath = Path.GetFullPath(e.OldFullPath);
+        lock (_lock)
+        {
+            if (_fileToCommandId.TryGetValue(oldPath, out var oldId))
+            {
+                _commands.Remove(oldId);
+                _fileToCommandId.Remove(oldPath);
+            }
+        }
+
+        // Cargar el nuevo
+        DebounceReload(e.FullPath);
     }
 
     // =====================================================================
@@ -197,5 +239,9 @@ public class DynRegistry : IDisposable
     {
         _watcher?.Dispose();
         _watcher = null;
+
+        foreach (var cts in _debounceTokens.Values)
+            cts.Cancel();
+        _debounceTokens.Clear();
     }
 }

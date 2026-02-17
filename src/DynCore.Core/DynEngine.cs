@@ -395,13 +395,20 @@ public class DynEngine : IDynEngine
         {
             if (_context == null)
                 throw new InvalidOperationException("'@@usuario@@' requiere DynContext registrado en DI.");
+            if (_context.UsuarioId == 0)
+                _logger.LogWarning("DynCore: @@usuario@@ es 0. Asegure configurar DynContext.UsuarioId en su sesión.");
             return _context.UsuarioId;
         }
 
-        if (from.StartsWith("@@") && from.EndsWith("@@") && _context?.Tokens != null)
+        // @@token@@ custom → buscar en DynContext.Tokens, error claro si no existe
+        if (from.StartsWith("@@") && from.EndsWith("@@"))
         {
+            if (_context?.Tokens == null)
+                throw new InvalidOperationException($"Token '{from}' requiere DynContext registrado en DI.");
             if (_context.Tokens.TryGetValue(from, out var tokenValue))
                 return tokenValue;
+            throw new InvalidOperationException(
+                $"Token '{from}' no encontrado en DynContext.Tokens. Tokens registrados: [{string.Join(", ", _context.Tokens.Keys)}]");
         }
 
         if (dict.TryGetValue(from, out var value))
@@ -412,8 +419,12 @@ public class DynEngine : IDynEngine
 
     private Dictionary<string, object?> ObjectToDictionary(object obj)
     {
-        if (obj is Dictionary<string, object?> dict) return dict;
-        if (obj is Dictionary<string, object> d2) return d2.ToDictionary(kv => kv.Key, kv => (object?)kv.Value);
+        if (obj is Dictionary<string, object?> dict)
+            return new Dictionary<string, object?>(dict, StringComparer.OrdinalIgnoreCase);
+        if (obj is Dictionary<string, object> d2)
+            return new Dictionary<string, object?>(
+                d2.Select(kv => KeyValuePair.Create(kv.Key, (object?)kv.Value)),
+                StringComparer.OrdinalIgnoreCase);
         if (obj is JsonElement je) return JsonElementToDict(je);
 
         var result = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
@@ -475,7 +486,8 @@ public class DynEngine : IDynEngine
     {
         if (parameters == null) return $"dyncore:{commandId}";
         var dict = ObjectToDictionary(parameters);
-        var paramStr = string.Join("|", dict.OrderBy(kv => kv.Key).Select(kv => $"{kv.Key}={kv.Value}"));
-        return $"dyncore:{commandId}:{paramStr}";
+        var sorted = dict.OrderBy(kv => kv.Key).ToDictionary(kv => kv.Key, kv => kv.Value);
+        var paramJson = JsonSerializer.Serialize(sorted);
+        return $"dyncore:{commandId}:{paramJson}";
     }
 }

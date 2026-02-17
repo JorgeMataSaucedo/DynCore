@@ -9,8 +9,8 @@ public class DynResult
 {
     public bool IsSuccess { get; private set; }
     public string? Error { get; private set; }
-    public string CommandId { get; set; } = string.Empty;
-    public long ElapsedMs { get; set; }
+    public string CommandId { get; internal set; } = string.Empty;
+    public long ElapsedMs { get; internal set; }
 
     /// <summary>
     /// Datos para estrategias Query/Transaction (un solo resultado).
@@ -29,7 +29,7 @@ public class DynResult
     /// Key = commandId del include, Value = datos del lookup.
     /// Ejemplo: result.Lookups["rh.lookups.puestos"] → lista de puestos
     /// </summary>
-    public Dictionary<string, List<Dictionary<string, object?>>> Lookups { get; set; } = new();
+    public Dictionary<string, List<Dictionary<string, object?>>> Lookups { get; internal set; } = new();
 
     /// <summary>
     /// Acceso directo a un dataset por nombre: result["info"]
