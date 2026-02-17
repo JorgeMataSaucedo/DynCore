@@ -13,6 +13,11 @@ public class DynResult
     public long ElapsedMs { get; internal set; }
 
     /// <summary>
+    /// Identificador único de la ejecución para trazabilidad/observabilidad.
+    /// </summary>
+    public Guid TraceId { get; internal set; }
+
+    /// <summary>
     /// Datos para estrategias Query/Transaction (un solo resultado).
     /// Lista de filas donde cada fila es un diccionario columna→valor.
     /// </summary>

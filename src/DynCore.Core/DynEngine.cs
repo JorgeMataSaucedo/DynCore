@@ -92,6 +92,7 @@ public class DynEngine : IDynEngine
             sw.Stop();
             result.CommandId = commandId;
             result.ElapsedMs = sw.ElapsedMilliseconds;
+            result.TraceId = Guid.NewGuid();
 
             // Guardar en caché si aplica
             if (result.IsSuccess && cmd.Cache > 0 && _cache != null)
@@ -101,7 +102,8 @@ public class DynEngine : IDynEngine
                 _logger.LogDebug("DynCore: {CommandId} → CACHED ({Seconds}s)", commandId, cmd.Cache);
             }
 
-            _logger.LogInformation("DynCore: {CommandId} → {Status} ({Ms}ms){Includes}",
+            _logger.LogInformation("DynCore: [{TraceId}] {CommandId} → {Status} ({Ms}ms){Includes}",
+                result.TraceId.ToString("N")[..8],
                 commandId,
                 result.IsSuccess ? "OK" : "FAIL",
                 result.ElapsedMs,

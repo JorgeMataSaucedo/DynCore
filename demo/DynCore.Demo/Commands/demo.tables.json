@@ -1,0 +1,8 @@
+{
+  "id": "demo.tables",
+  "description": "Lista tablas del sistema - prueba basica de conexion",
+  "procedure": "sp_tables",
+  "connection": "Core",
+  "strategy": "Query",
+  "params": []
+}

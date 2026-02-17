@@ -81,6 +81,14 @@ public class DynResultTests
     }
 
     [Fact]
+    public void TraceId_DefaultsToEmpty()
+    {
+        var result = DynResult.Success(new());
+
+        Assert.Equal(Guid.Empty, result.TraceId);
+    }
+
+    [Fact]
     public void Result_NeverReturnsNull()
     {
         var success = DynResult.Success(new());

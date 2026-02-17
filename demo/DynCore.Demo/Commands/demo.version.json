@@ -1,0 +1,8 @@
+{
+  "id": "demo.version",
+  "description": "Version de SQL Server - prueba minima",
+  "procedure": "sp_server_info",
+  "connection": "Core",
+  "strategy": "Query",
+  "params": []
+}
