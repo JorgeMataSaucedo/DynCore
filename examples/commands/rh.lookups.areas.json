@@ -1,0 +1,9 @@
+{
+  "id": "rh.lookups.areas",
+  "description": "Catálogo de áreas (cacheado 5 min)",
+  "procedure": "precAreaSel",
+  "connection": "Operations",
+  "strategy": "Query",
+  "cache": 300,
+  "params": []
+}

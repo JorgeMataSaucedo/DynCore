@@ -1,0 +1,9 @@
+{
+  "id": "rh.lookups.puestos",
+  "description": "Catálogo de puestos (cacheado 5 min)",
+  "procedure": "precPuestoSel",
+  "connection": "Operations",
+  "strategy": "Query",
+  "cache": 300,
+  "params": []
+}

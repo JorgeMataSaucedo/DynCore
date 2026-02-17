@@ -1,0 +1,15 @@
+{
+  "id": "rh.candidates.save",
+  "description": "Guarda o actualiza información general de un candidato",
+  "procedure": "precCandidateUpd",
+  "connection": "Operations",
+  "strategy": "Transaction",
+  "params": [
+    { "name": "@pnRecCandidateId", "from": "RecCandidateId", "type": "int" },
+    { "name": "@psNombre", "from": "Nombre", "type": "string" },
+    { "name": "@psApellidoPaterno", "from": "ApellidoPaterno", "type": "string" },
+    { "name": "@psApellidoMaterno", "from": "ApellidoMaterno", "type": "string", "optional": true },
+    { "name": "@pnClaPuesto", "from": "ClaPuesto", "type": "int" },
+    { "name": "@pnUsuarioIdUpd", "from": "UsuarioId", "type": "int" }
+  ]
+}

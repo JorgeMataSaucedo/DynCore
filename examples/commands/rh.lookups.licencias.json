@@ -1,0 +1,9 @@
+{
+  "id": "rh.lookups.licencias",
+  "description": "Catálogo de tipos de licencia (cacheado 5 min)",
+  "procedure": "precTipoLicenciaSel",
+  "connection": "Operations",
+  "strategy": "Query",
+  "cache": 300,
+  "params": []
+}

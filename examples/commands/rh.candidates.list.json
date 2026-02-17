@@ -1,0 +1,12 @@
+{
+  "id": "rh.candidates.list",
+  "description": "Lista candidatos filtrados por fecha y estatus",
+  "procedure": "precCandidateSel",
+  "connection": "Operations",
+  "strategy": "MultiResult",
+  "params": [
+    { "name": "@pdFechaIni", "from": "FechaIni", "type": "date" },
+    { "name": "@pdFechaFin", "from": "FechaFin", "type": "date" },
+    { "name": "@pnEstatusId", "from": "EstatusId", "type": "int", "optional": true }
+  ]
+}

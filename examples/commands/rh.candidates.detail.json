@@ -1,0 +1,17 @@
+{
+  "id": "rh.candidates.detail",
+  "description": "Detalle de candidato con catálogos (combo). Reemplaza WCS tipo 3/4.",
+  "procedure": "precCandidateSelById",
+  "connection": "Operations",
+  "strategy": "Query",
+  "timeout": 30,
+  "params": [
+    { "name": "@pnRecCandidateId", "from": "RecCandidateId", "type": "int" },
+    { "name": "@pnUsuarioIdUpd", "from": "@@usuario@@", "type": "int" }
+  ],
+  "includes": [
+    "rh.lookups.puestos",
+    "rh.lookups.areas",
+    "rh.lookups.licencias"
+  ]
+}
