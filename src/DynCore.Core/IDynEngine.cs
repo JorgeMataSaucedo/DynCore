@@ -5,5 +5,5 @@ namespace DynCore.Core;
 /// </summary>
 public interface IDynEngine
 {
-    Task<DynResult> Execute(string commandId, object? parameters = null);
+    Task<DynResult> Execute(string commandId, object? parameters = null, CancellationToken cancellationToken = default);
 }

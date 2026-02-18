@@ -49,7 +49,7 @@ public class DynEngine : IDynEngine
     /// <summary>
     /// Ejecuta un comando DynCore.
     /// </summary>
-    public async Task<DynResult> Execute(string commandId, object? parameters = null)
+    public async Task<DynResult> Execute(string commandId, object? parameters = null, CancellationToken cancellationToken = default)
     {
         var sw = Stopwatch.StartNew();
 
@@ -76,10 +76,10 @@ public class DynEngine : IDynEngine
 
             var result = cmd.Strategy.ToLowerInvariant() switch
             {
-                "query"            => await ExecuteQuery(connStr, cmd, sqlParams),
-                "transaction"      => await ExecuteTransaction(connStr, cmd, sqlParams),
-                "multiresult"      => await ExecuteMultiResult(connStr, cmd, sqlParams),
-                "multitransaction" => await ExecuteMultiTransaction(connStr, cmd, sqlParams),
+                "query"            => await ExecuteQuery(connStr, cmd, sqlParams, cancellationToken),
+                "transaction"      => await ExecuteTransaction(connStr, cmd, sqlParams, cancellationToken),
+                "multiresult"      => await ExecuteMultiResult(connStr, cmd, sqlParams, cancellationToken),
+                "multitransaction" => await ExecuteMultiTransaction(connStr, cmd, sqlParams, cancellationToken),
                 _ => DynResult.Fail(
                     $"Estrategia '{cmd.Strategy}' no reconocida. " +
                     "Opciones: Query, Transaction, MultiResult, MultiTransaction")
@@ -87,7 +87,7 @@ public class DynEngine : IDynEngine
 
             // Ejecutar includes (combos/lookups)
             if (result.IsSuccess && cmd.Includes.Count > 0)
-                await ExecuteIncludes(cmd, parameters, result);
+                await ExecuteIncludes(cmd, parameters, result, cancellationToken);
 
             sw.Stop();
             result.CommandId = commandId;
@@ -114,6 +114,12 @@ public class DynEngine : IDynEngine
 
             return result;
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            sw.Stop();
+            _logger.LogWarning("DynCore: '{CommandId}' cancelado ({Ms}ms)", commandId, sw.ElapsedMilliseconds);
+            return DynResult.Fail($"Ejecución de '{commandId}' cancelada");
+        }
         catch (KeyNotFoundException ex)
         {
             _logger.LogError(ex, "DynCore: Comando no encontrado '{CommandId}'", commandId);
@@ -130,45 +136,45 @@ public class DynEngine : IDynEngine
     // ESTRATEGIAS
     // =====================================================================
 
-    private async Task<DynResult> ExecuteQuery(string connStr, DynCommand cmd, SqlParameter[] sqlParams)
+    private async Task<DynResult> ExecuteQuery(string connStr, DynCommand cmd, SqlParameter[] sqlParams, CancellationToken ct)
     {
         await using var conn = new SqlConnection(connStr);
-        await conn.OpenAsync();
+        await conn.OpenAsync(ct);
         await using var sqlCmd = CreateSqlCommand(cmd, conn, sqlParams);
 
-        var data = await ReadSingleResultAsync(sqlCmd);
+        var data = await ReadSingleResultAsync(sqlCmd, ct);
         return DynResult.Success(data);
     }
 
-    private async Task<DynResult> ExecuteTransaction(string connStr, DynCommand cmd, SqlParameter[] sqlParams)
+    private async Task<DynResult> ExecuteTransaction(string connStr, DynCommand cmd, SqlParameter[] sqlParams, CancellationToken ct)
     {
         using var scope = new TransactionScope(TransactionScopeAsyncFlowOption.Enabled);
         await using var conn = new SqlConnection(connStr);
-        await conn.OpenAsync();
+        await conn.OpenAsync(ct);
         await using var sqlCmd = CreateSqlCommand(cmd, conn, sqlParams);
 
-        var data = await ReadSingleResultAsync(sqlCmd);
+        var data = await ReadSingleResultAsync(sqlCmd, ct);
         return CompleteTransaction(scope, cmd, data);
     }
 
-    private async Task<DynResult> ExecuteMultiResult(string connStr, DynCommand cmd, SqlParameter[] sqlParams)
+    private async Task<DynResult> ExecuteMultiResult(string connStr, DynCommand cmd, SqlParameter[] sqlParams, CancellationToken ct)
     {
         await using var conn = new SqlConnection(connStr);
-        await conn.OpenAsync();
+        await conn.OpenAsync(ct);
         await using var sqlCmd = CreateSqlCommand(cmd, conn, sqlParams);
 
-        var dataSets = await ReadMultiResultAsync(sqlCmd);
+        var dataSets = await ReadMultiResultAsync(sqlCmd, ct);
         return DynResult.SuccessMulti(dataSets);
     }
 
-    private async Task<DynResult> ExecuteMultiTransaction(string connStr, DynCommand cmd, SqlParameter[] sqlParams)
+    private async Task<DynResult> ExecuteMultiTransaction(string connStr, DynCommand cmd, SqlParameter[] sqlParams, CancellationToken ct)
     {
         using var scope = new TransactionScope(TransactionScopeAsyncFlowOption.Enabled);
         await using var conn = new SqlConnection(connStr);
-        await conn.OpenAsync();
+        await conn.OpenAsync(ct);
         await using var sqlCmd = CreateSqlCommand(cmd, conn, sqlParams);
 
-        var dataSets = await ReadMultiResultAsync(sqlCmd);
+        var dataSets = await ReadMultiResultAsync(sqlCmd, ct);
 
         if (dataSets.TryGetValue("info", out var infoRows) && infoRows.Count > 0)
         {
@@ -207,9 +213,9 @@ public class DynEngine : IDynEngine
     // INCLUDES (COMBOS)
     // =====================================================================
 
-    private async Task ExecuteIncludes(DynCommand mainCmd, object? parameters, DynResult result)
+    private async Task ExecuteIncludes(DynCommand mainCmd, object? parameters, DynResult result, CancellationToken ct)
     {
-        var tasks = mainCmd.Includes.Select(id => ExecuteSingleInclude(id, parameters));
+        var tasks = mainCmd.Includes.Select(id => ExecuteSingleInclude(id, parameters, ct));
         var results = await Task.WhenAll(tasks);
 
         foreach (var (id, data) in results)
@@ -217,7 +223,7 @@ public class DynEngine : IDynEngine
     }
 
     private async Task<(string id, List<Dictionary<string, object?>> data)> ExecuteSingleInclude(
-        string includeId, object? parameters)
+        string includeId, object? parameters, CancellationToken ct)
     {
         try
         {
@@ -245,10 +251,10 @@ public class DynEngine : IDynEngine
             var sqlParams = MapParameters(cmd, parameters);
 
             await using var conn = new SqlConnection(connStr);
-            await conn.OpenAsync();
+            await conn.OpenAsync(ct);
             await using var sqlCmd = CreateSqlCommand(cmd, conn, sqlParams);
 
-            var data = await ReadSingleResultAsync(sqlCmd);
+            var data = await ReadSingleResultAsync(sqlCmd, ct);
 
             // Cachear el include si tiene caché configurado, con token de invalidación
             if (cmd.Cache > 0 && _cache != null)
@@ -323,12 +329,12 @@ public class DynEngine : IDynEngine
         return sqlCmd;
     }
 
-    private async Task<List<Dictionary<string, object?>>> ReadSingleResultAsync(SqlCommand cmd)
+    private async Task<List<Dictionary<string, object?>>> ReadSingleResultAsync(SqlCommand cmd, CancellationToken ct)
     {
         var rows = new List<Dictionary<string, object?>>();
-        await using var reader = await cmd.ExecuteReaderAsync();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
 
-        while (await reader.ReadAsync())
+        while (await reader.ReadAsync(ct))
         {
             var row = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
             for (int i = 0; i < reader.FieldCount; i++)
@@ -339,10 +345,10 @@ public class DynEngine : IDynEngine
         return rows;
     }
 
-    private async Task<Dictionary<string, List<Dictionary<string, object?>>>> ReadMultiResultAsync(SqlCommand cmd)
+    private async Task<Dictionary<string, List<Dictionary<string, object?>>>> ReadMultiResultAsync(SqlCommand cmd, CancellationToken ct)
     {
         var dataSets = new Dictionary<string, List<Dictionary<string, object?>>>();
-        await using var reader = await cmd.ExecuteReaderAsync();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
 
         int idx = 0;
         do
@@ -350,7 +356,7 @@ public class DynEngine : IDynEngine
             var key = idx == 0 ? "info" : $"info{idx + 1}";
             var rows = new List<Dictionary<string, object?>>();
 
-            while (await reader.ReadAsync())
+            while (await reader.ReadAsync(ct))
             {
                 var row = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
                 for (int i = 0; i < reader.FieldCount; i++)
@@ -360,7 +366,7 @@ public class DynEngine : IDynEngine
 
             dataSets[key] = rows;
             idx++;
-        } while (await reader.NextResultAsync());
+        } while (await reader.NextResultAsync(ct));
 
         return dataSets;
     }
