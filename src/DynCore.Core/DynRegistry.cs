@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
+using Microsoft.Extensions.Primitives;
 using Microsoft.Extensions.Logging;
 
 namespace DynCore.Core;
@@ -7,12 +8,14 @@ namespace DynCore.Core;
 /// <summary>
 /// Registro de comandos DynCore. Carga definiciones desde archivos JSON.
 /// Soporta hot reload con debounce y retry.
+/// Expone CancellationChangeTokens para invalidar cache al recargar comandos.
 /// </summary>
 public class DynRegistry : IDisposable
 {
     private readonly Dictionary<string, DynCommand> _commands = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, string> _fileToCommandId = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _debounceTokens = new();
+    private readonly ConcurrentDictionary<string, CancellationTokenSource> _cacheTokens = new(StringComparer.OrdinalIgnoreCase);
     private readonly ILogger<DynRegistry> _logger;
     private readonly object _lock = new();
     private FileSystemWatcher? _watcher;
@@ -77,6 +80,27 @@ public class DynRegistry : IDisposable
             return _commands.Values.ToList().AsReadOnly();
     }
 
+    /// <summary>
+    /// Obtiene un IChangeToken vinculado a un commandId.
+    /// Se cancela automáticamente cuando el comando se recarga o elimina por hot reload,
+    /// lo que causa que IMemoryCache evicte las entradas vinculadas.
+    /// </summary>
+    public IChangeToken GetCacheToken(string commandId)
+    {
+        var cts = _cacheTokens.GetOrAdd(commandId, _ => new CancellationTokenSource());
+        return new CancellationChangeToken(cts.Token);
+    }
+
+    private void InvalidateCacheToken(string commandId)
+    {
+        if (_cacheTokens.TryRemove(commandId, out var oldCts))
+        {
+            oldCts.Cancel();
+            oldCts.Dispose();
+            _logger.LogDebug("DynRegistry: Cache invalidado para '{Id}'", commandId);
+        }
+    }
+
     // =====================================================================
     // FILE LOADING
     // =====================================================================
@@ -113,7 +137,14 @@ public class DynRegistry : IDisposable
 
             // Si este archivo ya tenía un comando con otro ID, remover el viejo
             if (_fileToCommandId.TryGetValue(normalizedPath, out var oldId) && oldId != cmd.Id)
+            {
                 _commands.Remove(oldId);
+                InvalidateCacheToken(oldId);
+            }
+
+            // Si el comando ya existía (recarga), invalidar su cache
+            if (_commands.ContainsKey(cmd.Id))
+                InvalidateCacheToken(cmd.Id);
 
             _commands[cmd.Id] = cmd;
             _fileToCommandId[normalizedPath] = cmd.Id;
@@ -209,6 +240,7 @@ public class DynRegistry : IDisposable
             {
                 _commands.Remove(commandId);
                 _fileToCommandId.Remove(normalizedPath);
+                InvalidateCacheToken(commandId);
                 _logger.LogInformation("DynRegistry: Comando '{Id}' removido (archivo eliminado)", commandId);
             }
         }
@@ -224,6 +256,7 @@ public class DynRegistry : IDisposable
             {
                 _commands.Remove(oldId);
                 _fileToCommandId.Remove(oldPath);
+                InvalidateCacheToken(oldId);
             }
         }
 
@@ -243,5 +276,12 @@ public class DynRegistry : IDisposable
         foreach (var cts in _debounceTokens.Values)
             cts.Cancel();
         _debounceTokens.Clear();
+
+        foreach (var cts in _cacheTokens.Values)
+        {
+            cts.Cancel();
+            cts.Dispose();
+        }
+        _cacheTokens.Clear();
     }
 }

@@ -94,11 +94,14 @@ public class DynEngine : IDynEngine
             result.ElapsedMs = sw.ElapsedMilliseconds;
             result.TraceId = Guid.NewGuid();
 
-            // Guardar en caché si aplica
+            // Guardar en caché si aplica, vinculado al token de invalidación del registry
             if (result.IsSuccess && cmd.Cache > 0 && _cache != null)
             {
                 var cacheKey = BuildCacheKey(commandId, parameters);
-                _cache.Set(cacheKey, result, TimeSpan.FromSeconds(cmd.Cache));
+                var cacheOptions = new MemoryCacheEntryOptions()
+                    .SetAbsoluteExpiration(TimeSpan.FromSeconds(cmd.Cache))
+                    .AddExpirationToken(_registry.GetCacheToken(commandId));
+                _cache.Set(cacheKey, result, cacheOptions);
                 _logger.LogDebug("DynCore: {CommandId} → CACHED ({Seconds}s)", commandId, cmd.Cache);
             }
 
@@ -247,11 +250,14 @@ public class DynEngine : IDynEngine
 
             var data = await ReadSingleResultAsync(sqlCmd);
 
-            // Cachear el include si tiene caché configurado
+            // Cachear el include si tiene caché configurado, con token de invalidación
             if (cmd.Cache > 0 && _cache != null)
             {
                 var cacheKey = BuildCacheKey(includeId, parameters);
-                _cache.Set(cacheKey, data, TimeSpan.FromSeconds(cmd.Cache));
+                var cacheOptions = new MemoryCacheEntryOptions()
+                    .SetAbsoluteExpiration(TimeSpan.FromSeconds(cmd.Cache))
+                    .AddExpirationToken(_registry.GetCacheToken(includeId));
+                _cache.Set(cacheKey, data, cacheOptions);
             }
 
             _logger.LogDebug("DynCore: Include '{Id}' → {Rows} filas", includeId, data.Count);
