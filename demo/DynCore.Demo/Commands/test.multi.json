@@ -1,0 +1,8 @@
+{
+  "id": "test.multi",
+  "description": "MultiResult: 3 datasets (resumen, conexiones, últimos comandos)",
+  "procedure": "precTestMultiResult",
+  "connection": "Core",
+  "strategy": "MultiResult",
+  "params": []
+}

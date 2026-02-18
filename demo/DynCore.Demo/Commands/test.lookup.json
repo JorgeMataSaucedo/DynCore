@@ -1,0 +1,9 @@
+{
+  "id": "test.lookup",
+  "description": "Lookup: Catálogo de conexiones (para probar includes y cache)",
+  "procedure": "precTestLookup",
+  "connection": "Core",
+  "strategy": "Query",
+  "cache": 300,
+  "params": []
+}

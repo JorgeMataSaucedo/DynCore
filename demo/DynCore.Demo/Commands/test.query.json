@@ -1,0 +1,10 @@
+{
+  "id": "test.query",
+  "description": "Query: Lee últimos comandos de acsComandoSQL",
+  "procedure": "precTestQuery",
+  "connection": "Core",
+  "strategy": "Query",
+  "params": [
+    { "name": "@pnTop", "from": "top", "type": "int", "optional": true }
+  ]
+}

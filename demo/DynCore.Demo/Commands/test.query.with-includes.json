@@ -1,0 +1,11 @@
+{
+  "id": "test.query.with-includes",
+  "description": "Query + Includes: Lee comandos con catálogo de conexiones",
+  "procedure": "precTestQuery",
+  "connection": "Core",
+  "strategy": "Query",
+  "params": [
+    { "name": "@pnTop", "from": "top", "type": "int", "optional": true }
+  ],
+  "includes": ["test.lookup"]
+}

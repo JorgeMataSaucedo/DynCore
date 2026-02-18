@@ -1,0 +1,11 @@
+{
+  "id": "test.transaction",
+  "description": "Transaction: Simula insert con validación y commit/rollback",
+  "procedure": "precTestTransaction",
+  "connection": "Core",
+  "strategy": "Transaction",
+  "params": [
+    { "name": "@psNombre", "from": "nombre", "type": "string" },
+    { "name": "@pnUsuarioId", "from": "@@usuario@@", "type": "int" }
+  ]
+}
